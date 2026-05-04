@@ -1,0 +1,84 @@
+# ============================================================
+# clang-format configuration,
+# created by: Iurii Dubinin.
+# ============================================================
+
+BasedOnStyle: LLVM
+Standard: c++20
+
+# ------------------------------------------------------------
+# Indentation
+# ------------------------------------------------------------
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+
+NamespaceIndentation: All
+IndentAccessModifiers: false
+IndentCaseLabels: true
+IndentExternBlock: AfterExternBlock
+
+# ------------------------------------------------------------
+# Braces
+# ------------------------------------------------------------
+BreakBeforeBraces: Attach
+BraceWrapping:
+  AfterClass: false
+  AfterStruct: false
+  AfterNamespace: false
+  AfterFunction: false
+  BeforeElse: false
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: false
+
+# ------------------------------------------------------------
+# Classes & Functions
+# ------------------------------------------------------------
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AlwaysBreakAfterDefinitionReturnType: None
+
+# ------------------------------------------------------------
+# Line length
+# ------------------------------------------------------------
+ColumnLimit: 100
+
+# ------------------------------------------------------------
+# Includes
+# ------------------------------------------------------------
+SortIncludes: true
+IncludeBlocks: Regroup
+
+IncludeCategories:
+  - Regex: '^<.*>'
+    Priority: 1
+
+  - Regex: '^".*"'
+    Priority: 2
+
+  - Regex: '.*'
+    Priority: 3
+
+# ------------------------------------------------------------
+# Misc
+# ------------------------------------------------------------
+PointerAlignment: Left
+ReferenceAlignment: Left
+SpacesInParentheses: false
+SpaceBeforeParens: ControlStatements
+
+# ------------------------------------------------------------
+# Alignment
+# ------------------------------------------------------------
+AlignConsecutiveDeclarations: true
+AlignConsecutiveAssignments: true
+AlignConsecutiveBitFields: true
+
+# ------------------------------------------------------------
+# Parameters formatting
+# ------------------------------------------------------------
+BinPackParameters: false
+BinPackArguments: false
+AllowAllParametersOfDeclarationOnNextLine: false
