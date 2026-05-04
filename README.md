@@ -1,4 +1,4 @@
-# Yuka
+# Yuka Agent
 - - -
 ## System dependencies:
 - Ollama
