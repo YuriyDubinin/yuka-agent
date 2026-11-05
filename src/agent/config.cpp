@@ -1,11 +1,11 @@
-#include "config.hpp"
+#include "agent/config.hpp"
 
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 
-#include "face_discovery.hpp"
+#include "faces/face_discovery.hpp"
 
 namespace yuka {
 

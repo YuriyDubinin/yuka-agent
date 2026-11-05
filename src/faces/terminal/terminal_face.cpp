@@ -1,11 +1,11 @@
-#include "terminal_face.hpp"
+#include "faces/terminal/terminal_face.hpp"
 
 #include <chrono>
 #include <iostream>
 #include <thread>
 
-#include "signals.hpp"
-#include "terminal.hpp"
+#include "platform/signals.hpp"
+#include "platform/terminal.hpp"
 
 namespace yuka {
 

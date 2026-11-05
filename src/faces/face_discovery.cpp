@@ -1,4 +1,4 @@
-#include "face_discovery.hpp"
+#include "faces/face_discovery.hpp"
 
 #include <cstdint>
 #include <cstdlib>

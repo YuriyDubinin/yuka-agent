@@ -25,14 +25,17 @@ FetchContent_MakeAvailable(nlohmann_json)
 # Executable
 # ------------------------------------------------------------
 add_executable(yuka-agent
-    src/main.cpp
-    src/config.cpp
-    src/ollama_client.cpp
-    src/signals.cpp
-    src/terminal_face.cpp
-    src/socket_face.cpp
-    src/face_discovery.cpp
+    src/app/main.cpp
+    src/agent/config.cpp
+    src/llm/ollama_client.cpp
+    src/faces/face_discovery.cpp
+    src/faces/terminal/terminal_face.cpp
+    src/faces/socket/socket_face.cpp
+    src/platform/signals.cpp
 )
+
+# Project headers are included relative to src/, e.g. "faces/socket/socket_face.hpp".
+target_include_directories(yuka-agent PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_link_libraries(yuka-agent PRIVATE nlohmann_json::nlohmann_json)
 

@@ -1,4 +1,4 @@
-#include "socket_face.hpp"
+#include "faces/socket/socket_face.hpp"
 
 #include <array>
 #include <cerrno>
@@ -16,7 +16,7 @@
 #include <unistd.h>
 #include <vector>
 
-#include "signals.hpp"
+#include "platform/signals.hpp"
 
 extern char** environ;
 

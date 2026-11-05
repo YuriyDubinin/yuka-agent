@@ -1,6 +1,6 @@
 #pragma once
 
-#include "face.hpp"
+#include "faces/face.hpp"
 
 namespace yuka {
 

@@ -148,7 +148,7 @@ build/
 
 Мордашка представляется как «неплохой электроновский интерфейс». Это значение
 `{face_title}` в приветствии и в системном промпте, оно задано константой
-`k_gui_title` в `src/face_discovery.hpp`.
+`k_gui_title` в `src/faces/face_discovery.hpp`.
 
 Как это работает:
 
@@ -258,20 +258,30 @@ build/
 ./refmt.sh
 ```
 
-Структура исходников:
+Структура исходников. Каталоги разделены по ролям агента; зависимости идут сверху вниз:
+`app → agent, llm, faces → platform`. Заголовки подключаются от корня `src/`, например
+`#include "faces/socket/socket_face.hpp"`.
 
-| Файл | Что внутри |
-|---|---|
-| `src/main.cpp` | Запуск, проверка Ollama, выбор мордашки, цикл чата, история диалога |
-| `src/config.{hpp,cpp}` | Загрузка и валидация `yuka.json`, приветствие, системный промпт |
-| `src/ollama_client.{hpp,cpp}` | Потоковый клиент Ollama Chat API (`/api/chat` через curl) |
-| `src/face.hpp` | Интерфейс мордашки, с которым работает цикл чата |
-| `src/terminal_face.{hpp,cpp}` | Терминальная мордашка (эффект печати, цвета) |
-| `src/socket_face.{hpp,cpp}` | Графическая мордашка: запуск процесса, Unix-сокет, NDJSON-протокол |
-| `src/face_discovery.{hpp,cpp}` | Поиск `gui/yuka-agent-desktop-ui` рядом с бинарником, путь к бинарнику |
-| `src/signals.{hpp,cpp}` | Обработка Ctrl+C |
-| `src/terminal.hpp` | Цвета и вывод сообщений в терминал |
-| `src/shell.hpp` | Экранирование строк для shell |
+```
+src/
+├── app/                        точка входа и сценарий запуска
+│   └── main.cpp                проверка Ollama, выбор мордашки, Terminal.app, цикл чата, история
+├── agent/                      кто такая Юка
+│   └── config.{hpp,cpp}        загрузка и валидация default.json, приветствие, системный промпт
+├── llm/                        подключение к модели
+│   └── ollama_client.{hpp,cpp} потоковый клиент Ollama (/api/chat, /api/tags через curl)
+├── faces/                      через что Юка общается
+│   ├── face.hpp                интерфейс мордашки, с которым работает цикл чата
+│   ├── face_discovery.{hpp,cpp} поиск gui/yuka-agent-desktop-ui рядом с бинарником, путь к бинарнику
+│   ├── terminal/
+│   │   └── terminal_face.{hpp,cpp} терминальная мордашка (эффект печати, цвета)
+│   └── socket/
+│       └── socket_face.{hpp,cpp}   графическая мордашка: запуск процесса, Unix-сокет, NDJSON
+└── platform/                   обёртки над ОС
+    ├── signals.{hpp,cpp}       обработка Ctrl+C
+    ├── terminal.hpp            цвета и вывод сообщений в терминал
+    └── shell.hpp               экранирование строк для shell
+```
 
 Модель меняется в `storage/yuka.json` (поле `model`). Скачайте её заранее
 через `ollama pull <model>`.

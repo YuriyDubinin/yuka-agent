@@ -1,4 +1,4 @@
-#include "ollama_client.hpp"
+#include "llm/ollama_client.hpp"
 
 #include <array>
 #include <cstdio>
@@ -8,7 +8,7 @@
 #include <unistd.h>
 #include <utility>
 
-#include "shell.hpp"
+#include "platform/shell.hpp"
 
 namespace yuka {
 

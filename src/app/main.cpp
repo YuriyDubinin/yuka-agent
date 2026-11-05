@@ -8,15 +8,15 @@
 #include <string>
 #include <vector>
 
-#include "config.hpp"
-#include "face.hpp"
-#include "face_discovery.hpp"
-#include "ollama_client.hpp"
-#include "shell.hpp"
-#include "signals.hpp"
-#include "socket_face.hpp"
-#include "terminal.hpp"
-#include "terminal_face.hpp"
+#include "agent/config.hpp"
+#include "faces/face.hpp"
+#include "faces/face_discovery.hpp"
+#include "faces/socket/socket_face.hpp"
+#include "faces/terminal/terminal_face.hpp"
+#include "llm/ollama_client.hpp"
+#include "platform/shell.hpp"
+#include "platform/signals.hpp"
+#include "platform/terminal.hpp"
 
 namespace {
 

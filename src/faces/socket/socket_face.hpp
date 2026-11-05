@@ -7,8 +7,8 @@
 #include <string>
 #include <sys/types.h>
 
-#include "face.hpp"
-#include "face_discovery.hpp"
+#include "faces/face.hpp"
+#include "faces/face_discovery.hpp"
 
 namespace yuka {
 
