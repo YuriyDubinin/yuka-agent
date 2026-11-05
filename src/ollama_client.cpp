@@ -1,0 +1,188 @@
+#include "ollama_client.hpp"
+
+#include <array>
+#include <cstdio>
+#include <filesystem>
+#include <stdexcept>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <utility>
+
+#include "shell.hpp"
+
+namespace yuka {
+
+    namespace {
+
+        using nlohmann::json;
+
+        // Temporary file holding the request body; removed on scope exit.
+        // The body goes through a file (curl --data-binary @file) so that user text never
+        // ends up in the shell command line.
+        class TempRequestFile {
+        public:
+            explicit TempRequestFile(const std::string& content) {
+                std::string templ =
+                    (std::filesystem::temp_directory_path() / "yuka-request-XXXXXX").string();
+
+                const int fd = mkstemp(templ.data());
+                if (fd == -1) {
+                    throw std::runtime_error("failed to create temporary request file");
+                }
+                path_ = templ;
+
+                const char* data      = content.data();
+                std::size_t remaining = content.size();
+                while (remaining > 0) {
+                    const ssize_t written = write(fd, data, remaining);
+                    if (written <= 0) {
+                        close(fd);
+                        std::filesystem::remove(path_);
+                        throw std::runtime_error("failed to write temporary request file");
+                    }
+                    data += written;
+                    remaining -= static_cast<std::size_t>(written);
+                }
+                close(fd);
+            }
+
+            ~TempRequestFile() {
+                std::error_code ec;
+                std::filesystem::remove(path_, ec);
+            }
+
+            TempRequestFile(const TempRequestFile&)            = delete;
+            TempRequestFile& operator=(const TempRequestFile&) = delete;
+
+            const std::string& path() const { return path_; }
+
+        private:
+            std::string path_;
+        };
+
+        // Owns a popen() stream; closes it on scope exit.
+        class Pipe {
+        public:
+            explicit Pipe(const std::string& command) : pipe_(popen(command.c_str(), "r")) {
+                if (pipe_ == nullptr) {
+                    throw std::runtime_error("failed to start curl process");
+                }
+            }
+
+            ~Pipe() { close(); }
+
+            Pipe(const Pipe&)            = delete;
+            Pipe& operator=(const Pipe&) = delete;
+
+            // Reads one line (without '\n') of any length. Returns false at end of stream.
+            bool read_line(std::string& line) {
+                line.clear();
+                std::array<char, 4096> buffer{};
+                while (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe_) !=
+                       nullptr) {
+                    line += buffer.data();
+                    if (!line.empty() && line.back() == '\n') {
+                        line.pop_back();
+                        return true;
+                    }
+                }
+                return !line.empty();
+            }
+
+            // Waits for the process and returns its exit code (-1 if unknown).
+            int close() {
+                if (pipe_ == nullptr) {
+                    return exit_code_;
+                }
+                const int status = pclose(pipe_);
+                pipe_            = nullptr;
+                exit_code_       = (status == -1) ? -1 : WEXITSTATUS(status);
+                return exit_code_;
+            }
+
+        private:
+            FILE* pipe_      = nullptr;
+            int   exit_code_ = -1;
+        };
+
+    } // namespace
+
+    OllamaClient::OllamaClient(std::string base_url, std::string model, nlohmann::json options)
+        : base_url_(std::move(base_url)), model_(std::move(model)), options_(std::move(options)) {}
+
+    std::string OllamaClient::chat(const std::vector<ChatMessage>& messages,
+                                   const ChunkHandler&             on_chunk) const {
+        json body;
+        body["model"]  = model_;
+        body["stream"] = true;
+        if (!options_.empty()) {
+            body["options"] = options_;
+        }
+        body["messages"] = json::array();
+        for (const auto& message : messages) {
+            body["messages"].push_back({{"role", message.role}, {"content", message.content}});
+        }
+
+        const TempRequestFile request(body.dump());
+
+        // -sS: no progress bar, but still report transport errors.
+        // -N:  disable output buffering so chunks arrive as soon as they are generated.
+        // stderr is folded into stdout so curl errors reach the user.
+        const std::string command = "curl -sSN --max-time 600 "
+                                    "-H 'Content-Type: application/json' "
+                                    "--data-binary @'" +
+                                    shell_escape_single_quotes(request.path()) + "' '" +
+                                    shell_escape_single_quotes(base_url_ + "/api/chat") + "' 2>&1";
+
+        Pipe pipe(command);
+
+        // Ollama streams NDJSON: {"message":{"content":"..."},"done":false} ... {"done":true}
+        std::string reply;
+        std::string diagnostics; // non-JSON output (curl errors)
+        std::string line;
+        bool        finished = false;
+        while (!finished && pipe.read_line(line)) {
+            if (line.empty()) {
+                continue;
+            }
+
+            const json event = json::parse(line, nullptr, /*allow_exceptions=*/false);
+            if (event.is_discarded() || !event.is_object()) {
+                diagnostics += line + "\n";
+                continue;
+            }
+
+            if (const auto err = event.find("error"); err != event.end() && err->is_string()) {
+                throw std::runtime_error("Ollama: " + err->get<std::string>());
+            }
+
+            if (const auto message = event.find("message");
+                message != event.end() && message->is_object()) {
+                const auto content = message->find("content");
+                if (content != message->end() && content->is_string()) {
+                    const std::string chunk = content->get<std::string>();
+                    if (!chunk.empty()) {
+                        reply += chunk;
+                        if (!on_chunk(chunk)) {
+                            return reply; // caller cancelled; Pipe closes curl
+                        }
+                    }
+                }
+            }
+
+            finished = event.value("done", false);
+        }
+
+        const int exit_code = pipe.close();
+        if (!finished) {
+            if (exit_code != 0) {
+                throw std::runtime_error("request to Ollama failed (curl exit code " +
+                                         std::to_string(exit_code) + "): " + diagnostics);
+            }
+            throw std::runtime_error("Ollama stream ended unexpectedly: " + diagnostics);
+        }
+
+        return reply;
+    }
+
+} // namespace yuka
