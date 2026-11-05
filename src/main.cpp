@@ -6,7 +6,6 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "config.hpp"
@@ -29,41 +28,41 @@ namespace {
     // How long a GUI face may take to start and connect.
     constexpr std::chrono::seconds k_face_connect_timeout{30};
 
-    bool is_ollama_available() {
-        return std::system("command -v ollama >/dev/null 2>&1") == 0;
+    // "qwen2.5" in the config matches "qwen2.5:latest" on the server, like the Ollama CLI does.
+    bool is_same_model(const std::string& installed, const std::string& wanted) {
+        return installed == wanted ||
+               (wanted.find(':') == std::string::npos && installed == wanted + ":latest");
     }
 
-    bool is_ollama_serve_running() {
-        return std::system("ollama list >/dev/null 2>&1") == 0;
-    }
-
-    bool start_ollama_serve_if_needed() {
-        if (is_ollama_serve_running()) {
-            return true;
-        }
-
-        yuka::term::print_info("Сервер Ollama не запущен. Запускаю 'ollama serve'...");
-
-        const int start_rc = std::system("nohup ollama serve >/tmp/yuka-ollama-serve.log 2>&1 &");
-        if (start_rc != 0) {
-            yuka::term::print_error("не удалось запустить 'ollama serve'.");
+    // Connects to an already running Ollama server and checks that the configured model is
+    // installed. Yuka never starts Ollama itself: if the server or the model is missing, she
+    // reports it and the agent does not start.
+    bool check_ollama(const yuka::OllamaClient& client) {
+        std::vector<std::string> models;
+        try {
+            models = client.list_models();
+        } catch (const std::exception& ex) {
+            yuka::term::print_error(std::string("сервер Ollama недоступен по адресу ") +
+                                    k_ollama_base_url + " (" + ex.what() + ").");
+            yuka::term::print_info("Запусти Ollama (приложение или 'ollama serve') и повтори.");
             return false;
         }
 
-        // Wait briefly until Ollama API becomes responsive.
-        for (int i = 0; i < 40; ++i) {
-            if (yuka::stop_requested()) {
-                return false;
-            }
-            if (is_ollama_serve_running()) {
-                yuka::term::print_info("Сервер Ollama запущен.");
+        for (const auto& installed : models) {
+            if (is_same_model(installed, client.model())) {
                 return true;
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(250));
         }
 
+        std::string installed_list;
+        for (const auto& installed : models) {
+            installed_list += (installed_list.empty() ? "" : ", ") + installed;
+        }
         yuka::term::print_error(
-            "'ollama serve' не успел запуститься (см. /tmp/yuka-ollama-serve.log).");
+            "модель '" + client.model() + "' не найдена на сервере Ollama (" +
+            (installed_list.empty() ? std::string("моделей нет") : "есть: " + installed_list) +
+            ").");
+        yuka::term::print_info("Установи её: ollama pull " + client.model());
         return false;
     }
 
@@ -260,13 +259,9 @@ int main() {
         return 1;
     }
 
-    if (!is_ollama_available()) {
-        yuka::term::print_error(
-            "Ollama CLI не найден. Установите Ollama и убедитесь, что 'ollama' есть в PATH.");
-        return 1;
-    }
-
-    if (!start_ollama_serve_if_needed()) {
+    // Ollama must already be running with the configured model; it is never started here.
+    const yuka::OllamaClient client(k_ollama_base_url, config.model, config.options);
+    if (!check_ollama(client)) {
         return 1;
     }
 
@@ -288,7 +283,6 @@ int main() {
                                "чтобы выйти.");
     }
 
-    const yuka::OllamaClient client(k_ollama_base_url, config.model, config.options);
     run_chat(*selection->face, selection->session, client, config);
 
     selection->face.reset(); // say goodbye to the GUI and wait for it to close

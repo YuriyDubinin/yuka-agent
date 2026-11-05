@@ -27,6 +27,10 @@ namespace yuka {
         std::string chat(const std::vector<ChatMessage>& messages,
                          const ChunkHandler&             on_chunk) const;
 
+        // Names of the models installed on the server (GET /api/tags), e.g. "qwen2.5:7b".
+        // Throws std::runtime_error if the server is not reachable or answers with an error.
+        std::vector<std::string> list_models() const;
+
         const std::string& model() const { return model_; }
 
     private:

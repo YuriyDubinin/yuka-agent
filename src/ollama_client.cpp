@@ -185,4 +185,38 @@ namespace yuka {
         return reply;
     }
 
+    std::vector<std::string> OllamaClient::list_models() const {
+        // -f: an HTTP error status fails curl instead of printing the error page.
+        const std::string command = "curl -sSf --max-time 5 '" +
+                                    shell_escape_single_quotes(base_url_ + "/api/tags") + "' 2>&1";
+
+        Pipe        pipe(command);
+        std::string output;
+        std::string line;
+        while (pipe.read_line(line)) {
+            output += line + "\n";
+        }
+
+        const int exit_code = pipe.close();
+        if (exit_code != 0) {
+            throw std::runtime_error("curl exit code " + std::to_string(exit_code) + ": " + output);
+        }
+
+        const json response = json::parse(output, nullptr, /*allow_exceptions=*/false);
+        if (response.is_discarded() || !response.is_object()) {
+            throw std::runtime_error("unexpected answer from /api/tags: " + output);
+        }
+
+        std::vector<std::string> names;
+        if (const auto models = response.find("models");
+            models != response.end() && models->is_array()) {
+            for (const auto& model : *models) {
+                if (model.is_object() && model.contains("name") && model["name"].is_string()) {
+                    names.push_back(model["name"].get<std::string>());
+                }
+            }
+        }
+        return names;
+    }
+
 } // namespace yuka
