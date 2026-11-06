@@ -9,9 +9,19 @@
             "close": true,
             "open_folder": {
                 "cli": "Contents/Resources/app/bin/code",
-                "args": ["--new-window", "{path}"]
+                "args": [
+                    "--new-window",
+                    "{path}"
+                ]
             },
             "window_title": "{folder}"
+        },
+        {
+            "id": "chrome",
+            "name": "Google Chrome",
+            "description": "браузер",
+            "bundle_id": "com.google.Chrome",
+            "open_url": true
         }
     ],
     "folders": [
@@ -21,6 +31,67 @@
             "path": "~/Documents/Projects",
             "contains": "projects",
             "open_with": "vscode"
+        }
+    ],
+    "links": [
+        {
+            "id": "youtube",
+            "name": "YouTube",
+            "aliases": [
+                "ютуб",
+                "ютьюб"
+            ],
+            "url": "https://www.youtube.com",
+            "open_with": "chrome"
+        },
+        {
+            "id": "vk",
+            "name": "ВКонтакте",
+            "aliases": [
+                "вк",
+                "вконтакте"
+            ],
+            "url": "https://vk.com",
+            "open_with": "chrome"
+        },
+        {
+            "id": "instagram",
+            "name": "Instagram",
+            "aliases": [
+                "инстаграм",
+                "инста"
+            ],
+            "url": "https://www.instagram.com",
+            "open_with": "chrome"
+        },
+        {
+            "id": "chatgpt",
+            "name": "ChatGPT",
+            "aliases": [
+                "гпт",
+                "чат гпт",
+                "чатгпт"
+            ],
+            "url": "https://chatgpt.com",
+            "open_with": "chrome"
+        },
+        {
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "aliases": [
+                "дипсик"
+            ],
+            "url": "https://chat.deepseek.com",
+            "open_with": "chrome"
+        },
+        {
+            "id": "bitbucket",
+            "name": "Bitbucket",
+            "aliases": [
+                "битбакет"
+            ],
+            "url": "https://bitbucket.org/",
+            "open_with": "chrome"
         }
     ]
 }

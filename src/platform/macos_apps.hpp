@@ -22,6 +22,10 @@ namespace yuka::macos {
     // Launches the app, or brings it to the front if it is running (`open -b`).
     bool open_bundle(const std::string& bundle_id);
 
+    // Opens a web address in this app – for a browser, a new tab (`open -b <id> <url>`).
+    // Only http(s) addresses are passed on; anything else is refused.
+    bool open_url(const std::string& bundle_id, const std::string& url);
+
     enum class QuitResult {
         quit,             // the app quit
         not_running,      // there was nothing to quit

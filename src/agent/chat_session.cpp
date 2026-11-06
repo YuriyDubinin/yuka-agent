@@ -6,6 +6,7 @@
 #include "platform/signals.hpp"
 #include "platform/terminal.hpp"
 #include "tools/builtin/app_tools.hpp"
+#include "tools/builtin/link_tools.hpp"
 #include "tools/builtin/load_skill_tool.hpp"
 #include "tools/builtin/project_tools.hpp"
 #include "tools/remote_tool.hpp"
@@ -103,11 +104,14 @@ namespace yuka {
         if (!skills_.empty()) {
             builtin.push_back(make_load_skill_tool(skills_));
         }
-        // What config/access.json allows: programs and project folders.
+        // What config/access.json allows: programs, project folders and web pages.
         for (auto& tool : make_app_tools(access_)) {
             builtin.push_back(std::move(tool));
         }
         for (auto& tool : make_project_tools(access_)) {
+            builtin.push_back(std::move(tool));
+        }
+        for (auto& tool : make_link_tools(access_)) {
             builtin.push_back(std::move(tool));
         }
         tools_.replace_source(ToolSource::builtin, std::move(builtin));

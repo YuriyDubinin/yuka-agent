@@ -41,6 +41,7 @@ add_executable(yuka-agent
     src/platform/signals.cpp
     src/tools/tool_registry.cpp
     src/tools/builtin/app_tools.cpp
+    src/tools/builtin/link_tools.cpp
     src/tools/builtin/load_skill_tool.cpp
     src/tools/builtin/name_match.cpp
     src/tools/builtin/project_tools.cpp

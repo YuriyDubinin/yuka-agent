@@ -66,6 +66,7 @@ namespace yuka {
                     app.bundle_id   = string_field(entry, "bundle_id");
                     app.can_open    = bool_field(entry, "open");
                     app.can_close   = bool_field(entry, "close");
+                    app.can_open_url = bool_field(entry, "open_url");
                     if (const auto title = string_field(entry, "window_title"); !title.empty()) {
                         app.window_title = title;
                     }
@@ -172,6 +173,57 @@ namespace yuka {
                 return folder;
             }
 
+            std::optional<AccessLink> link(const json&                   entry,
+                                           std::size_t                   index,
+                                           const std::vector<AccessApp>& apps) const {
+                AccessLink link;
+                if (entry.is_object()) {
+                    link.id        = string_field(entry, "id");
+                    link.name      = string_field(entry, "name");
+                    link.url       = string_field(entry, "url");
+                    link.open_with = string_field(entry, "open_with");
+                    if (const auto aliases = entry.find("aliases");
+                        aliases != entry.end() && aliases->is_array()) {
+                        for (const auto& alias : *aliases) {
+                            if (alias.is_string() && !alias.get<std::string>().empty()) {
+                                link.aliases.push_back(alias.get<std::string>());
+                            }
+                        }
+                    }
+                }
+                const std::string label =
+                    "страница " + (link.id.empty() ? "#" + std::to_string(index + 1)
+                                                   : "«" + link.id + "»");
+                if (!entry.is_object()) {
+                    warn(label, "это должен быть объект");
+                    return std::nullopt;
+                }
+                if (!is_valid_id(link.id)) {
+                    warn(label, "id должен состоять из a-z, 0-9, - и _");
+                    return std::nullopt;
+                }
+                if (link.name.empty()) {
+                    warn(label, "нет name");
+                    return std::nullopt;
+                }
+                if (!is_web_url(link.url)) {
+                    warn(label, "url должен быть обычным адресом https://… или http://…");
+                    return std::nullopt;
+                }
+                // No open_with: the first browser in "apps".
+                const auto browser = std::find_if(apps.begin(), apps.end(), [&](const AccessApp& a) {
+                    return a.can_open_url && (link.open_with.empty() || a.id == link.open_with);
+                });
+                if (browser == apps.end()) {
+                    warn(label, link.open_with.empty()
+                                    ? "в apps нет браузера (программы с \"open_url\": true)"
+                                    : "open_with должен указывать на программу с \"open_url\": true");
+                    return std::nullopt;
+                }
+                link.open_with = browser->id;
+                return link;
+            }
+
         private:
             fs::path file_;
         };
@@ -240,6 +292,23 @@ namespace yuka {
                 config.folders_.push_back(std::move(*folder));
             }
         }
+
+        if (const auto links = root.find("links"); links != root.end() && links->is_array()) {
+            for (std::size_t i = 0; i < links->size(); ++i) {
+                auto link = loader.link((*links)[i], i, config.apps_);
+                if (!link) {
+                    continue;
+                }
+                const bool duplicate =
+                    std::any_of(config.links_.begin(), config.links_.end(),
+                                [&](const AccessLink& l) { return l.id == link->id; });
+                if (duplicate) {
+                    loader.warn("страница «" + link->id + "»", "такой id уже есть");
+                    continue;
+                }
+                config.links_.push_back(std::move(*link));
+            }
+        }
         return config;
     }
 
@@ -250,6 +319,28 @@ namespace yuka {
             }
         }
         return nullptr;
+    }
+
+    bool is_web_url(const std::string& url) {
+        if (url.size() > 2048) {
+            return false;
+        }
+        std::size_t rest = 0;
+        if (url.rfind("https://", 0) == 0) {
+            rest = 8;
+        } else if (url.rfind("http://", 0) == 0) {
+            rest = 7;
+        } else {
+            return false; // javascript:, file:, vscode:, … never
+        }
+        for (const unsigned char c : url) {
+            if (c <= 0x20 || c == 0x7F) {
+                return false; // spaces and control characters
+            }
+        }
+        const auto  end       = url.find_first_of("/?#", rest);
+        const auto  authority = url.substr(rest, end == std::string::npos ? end : end - rest);
+        return !authority.empty() && authority.find('@') == std::string::npos;
     }
 
     bool is_inside(const fs::path& path, const fs::path& root) {

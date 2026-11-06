@@ -43,6 +43,14 @@ namespace yuka::macos {
         return run_command({"/usr/bin/open", "-b", bundle_id}, 15s).exit_code == 0;
     }
 
+    bool open_url(const std::string& bundle_id, const std::string& url) {
+        if (url.rfind("https://", 0) != 0 && url.rfind("http://", 0) != 0) {
+            return false; // never file:, javascript:, app schemes
+        }
+        // The address is one argument, not shell text: nothing in it is interpreted.
+        return run_command({"/usr/bin/open", "-b", bundle_id, url}, 15s).exit_code == 0;
+    }
+
     QuitResult quit(const std::string& bundle_id) {
         if (!is_running(bundle_id)) {
             return QuitResult::not_running;

@@ -24,8 +24,14 @@ namespace yuka {
     //     "folders": [
     //       { "id": "projects", "name": "Проекты", "path": "~/Documents/Projects",
     //         "contains": "projects", "open_with": "vscode" }
+    //     ],
+    //     "links": [
+    //       { "id": "youtube", "name": "YouTube", "aliases": ["ютуб"],
+    //         "url": "https://www.youtube.com", "open_with": "chrome" }
     //     ]
     //   }
+    //
+    // A browser is an app with "open_url": true.
 
     // How an app opens a folder: a command-line tool inside its bundle.
     struct OpenFolderCommand {
@@ -40,6 +46,7 @@ namespace yuka {
         std::string                      bundle_id; // e.g. com.microsoft.VSCode
         bool                             can_open  = false;
         bool                             can_close = false;
+        bool                             can_open_url = false; // a browser: opens web addresses
         std::optional<OpenFolderCommand> open_folder;
         // How a window of an opened folder is recognised: one " — "-separated part of the
         // window title equals this, with {folder} replaced by the folder name.
@@ -54,6 +61,15 @@ namespace yuka {
         std::string           open_with; // id of an app with open_folder
     };
 
+    // A web page Yura allowed Yuka to open by name ("открой ютуб").
+    struct AccessLink {
+        std::string              id;
+        std::string              name;
+        std::vector<std::string> aliases;   // how Yura says it: "ютуб", "вк"
+        std::string              url;       // https:// or http:// only
+        std::string              open_with; // id of an app with open_url (a browser)
+    };
+
     class AccessConfig {
     public:
         inline static const char* const k_file_name        = "access.json";
@@ -63,16 +79,21 @@ namespace yuka {
         // access; broken entries are skipped with a warning – the agent starts anyway.
         static AccessConfig load(const std::filesystem::path& config_dir);
 
-        bool empty() const { return apps_.empty() && folders_.empty(); }
+        bool empty() const { return apps_.empty() && folders_.empty() && links_.empty(); }
 
         const std::vector<AccessApp>&    apps() const { return apps_; }
         const std::vector<AccessFolder>& folders() const { return folders_; }
+        const std::vector<AccessLink>&   links() const { return links_; }
         const AccessApp*                 find_app(const std::string& id) const;
 
     private:
         std::vector<AccessApp>    apps_;
         std::vector<AccessFolder> folders_;
+        std::vector<AccessLink>   links_;
     };
+
+    // A plain web address: http(s), a host, no spaces, control characters or user info.
+    bool is_web_url(const std::string& url);
 
     // True if `path` (resolved) lies inside `root` (resolved) – never above it.
     bool is_inside(const std::filesystem::path& path, const std::filesystem::path& root);

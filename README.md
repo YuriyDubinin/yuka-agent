@@ -15,7 +15,7 @@
 | Бинарник агента | `build/yuka-agent` |
 | Личность и настройки (обязательно) | `build/config/default.json` |
 | Навыки (необязательно) | `build/config/skills.json` |
-| Доступ к программам и папкам (необязательно) | `build/config/access.json` |
+| Доступ к программам, папкам и сайтам (необязательно) | `build/config/access.json` |
 | Графический интерфейс, который ищет агент | `build/gui/yuka-agent-desktop-ui.app` (рядом с бинарником, в каталоге `gui/`) |
 
 ```
@@ -24,7 +24,7 @@ build/
 ├── config/            файлы Юки: агент их только читает
 │   ├── default.json   личность, правила, модель
 │   ├── skills.json    навыки (необязательно)
-│   └── access.json    к чему у Юки есть доступ: программы и папки проектов (необязательно)
+│   └── access.json    к чему у Юки есть доступ: программы, папки проектов, сайты (необязательно)
 └── gui/
     └── yuka-agent-desktop-ui.app
 ```
@@ -279,6 +279,7 @@ build/
 | **Агент** | `load_skill` — если в `config/skills.json` есть навыки | `src/tools/builtin/` |
 | **Агент** | `app_open`, `app_close` — для программ из `config/access.json` | `src/tools/builtin/app_tools.*` |
 | **Агент** | `project_open`, `project_close`, `project_close_all` — для папок проектов из `config/access.json` | `src/tools/builtin/project_tools.*` |
+| **Агент** | `link_open` — для сайтов из `config/access.json` | `src/tools/builtin/link_tools.*` |
 
 Правила хода:
 
@@ -357,9 +358,21 @@ build/
             "contains": "projects",
             "open_with": "vscode"
         }
+    ],
+    "links": [
+        {
+            "id": "youtube",
+            "name": "YouTube",
+            "aliases": ["ютуб", "ютьюб"],
+            "url": "https://www.youtube.com",
+            "open_with": "chrome"
+        }
     ]
 }
 ```
+
+(Браузер — обычная запись в `apps` с `"open_url": true`, например Google Chrome
+с `bundle_id` `com.google.Chrome`.)
 
 **`apps` — программы**
 
@@ -371,6 +384,7 @@ build/
 | `open` / `close` | можно ли открывать (если запущена — выйдет вперёд) и закрывать целиком (как ⌘Q) |
 | `open_folder` | как программа открывает папку: команда внутри `.app` (`cli`) и её аргументы, `{path}` — путь папки |
 | `window_title` | как узнать окно открытой папки: часть заголовка окна между « — », `{folder}` — имя папки |
+| `open_url` | `true` — это браузер: им открываются сайты из `links` |
 
 **`folders` — папки**
 
@@ -380,6 +394,30 @@ build/
 | `path` | путь (можно с `~`) |
 | `contains` | `projects` — каждая подпапка — отдельный проект |
 | `open_with` | `id` программы из `apps`, у которой есть `open_folder` |
+
+**`links` — сайты**
+
+| Поле | Смысл |
+|---|---|
+| `id`, `name` | имя страницы для модели и для людей |
+| `aliases` | как ты называешь её вслух: «ютуб», «вк», «гпт» |
+| `url` | адрес: только `https://` или `http://` |
+| `open_with` | `id` браузера из `apps` (с `"open_url": true`); если не указан — первый браузер |
+
+Сейчас в `access.json` шесть сайтов: YouTube, ВКонтакте, Instagram, ChatGPT, DeepSeek,
+Bitbucket — все открываются в Google Chrome. Модель называет только имя страницы, а адрес
+всегда берётся из файла, поэтому выдумать ссылку она не может. Адреса вроде `javascript:`,
+`file:` или `vscode://` в файл не пройдут: такая запись пропускается с предупреждением.
+
+Добавить свой сайт — одна запись в `links` и перезапуск `yuka-agent`.
+
+### Как Юка отличает проект от сайта и программы
+
+Модель видит в описании каждого инструмента его список: проекты у `project_open`, сайты у
+`link_open`, программы у `app_open`. «Открой альфу» она находит среди проектов, «открой
+ютуб» — среди сайтов, «открой VS Code» — среди программ. Если всё же ошибётся, инструмент
+ответит «такого нет» со списком, и модель сразу вызовет правильный. Чтобы не было путаницы,
+не давай сайту и проекту одинаковые имена.
 
 Узнать `bundle_id` программы:
 
@@ -455,7 +493,7 @@ src/
 ├── app/                          точка входа и сценарий запуска
 │   └── main.cpp                  проверка Ollama, выбор мордашки, Terminal.app
 ├── agent/                        кто такая Юка и как она ведёт разговор
-│   ├── access.{hpp,cpp}          access.json: программы и папки, проверка путей
+│   ├── access.{hpp,cpp}          access.json: программы, папки, сайты; проверка путей и адресов
 │   ├── config.{hpp,cpp}          default.json, приветствие, системный промпт
 │   ├── chat_session.{hpp,cpp}    цикл хода: модель → инструменты → модель, история, откат
 │   ├── skills.{hpp,cpp}          навыки из config/skills.json
@@ -466,7 +504,7 @@ src/
 │   ├── tool.hpp                  интерфейс инструмента, аннотации, результат
 │   ├── tool_registry.{hpp,cpp}   реестр: свои и инструменты мордашки
 │   ├── remote_tool.hpp           прокси инструмента мордашки (tool_call → tool_result)
-│   └── builtin/                  встроенные: load_skill, app_*, project_*, поиск имени
+│   └── builtin/                  встроенные: load_skill, app_*, project_*, link_open, поиск имени
 ├── faces/                        через что Юка общается
 │   ├── face.hpp                  интерфейс мордашки (и её инструментов)
 │   ├── face_discovery.{hpp,cpp}  поиск gui/yuka-agent-desktop-ui рядом с бинарником
