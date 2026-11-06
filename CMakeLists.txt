@@ -27,11 +27,16 @@ FetchContent_MakeAvailable(nlohmann_json)
 add_executable(yuka-agent
     src/app/main.cpp
     src/agent/config.cpp
+    src/agent/chat_session.cpp
+    src/agent/skills.cpp
+    src/agent/tool_call_text.cpp
     src/llm/ollama_client.cpp
     src/faces/face_discovery.cpp
     src/faces/terminal/terminal_face.cpp
     src/faces/socket/socket_face.cpp
     src/platform/signals.cpp
+    src/tools/tool_registry.cpp
+    src/tools/builtin/load_skill_tool.cpp
 )
 
 # Project headers are included relative to src/, e.g. "faces/socket/socket_face.hpp".

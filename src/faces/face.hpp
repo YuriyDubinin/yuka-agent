@@ -1,13 +1,25 @@
 #pragma once
 
+#include <chrono>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <vector>
+
+#include "tools/tool.hpp"
 
 namespace yuka {
 
     struct AgentInfo {
         std::string name;
         std::string model;
+    };
+
+    // A tool the face offers (protocol v2 `capabilities`).
+    struct FaceTool {
+        ToolSpec        spec;
+        std::string     title;
+        ToolAnnotations annotations;
     };
 
     // A "face" is the user-facing side of Yuka: the terminal, or a GUI connected over a socket.
@@ -31,6 +43,23 @@ namespace yuka {
 
         // False once the face is gone (e.g. the window was closed).
         virtual bool is_alive() const = 0;
+
+        // ---- Tools (protocol v2). The terminal offers none.
+
+        // True once after the face (re)sent its tool set; the caller then re-reads tools().
+        virtual bool take_tools_changed() { return false; }
+
+        virtual std::vector<FaceTool> tools() const { return {}; }
+
+        // The face's instructions for the model on how to use its tools.
+        virtual std::string tool_instructions() const { return {}; }
+
+        // Asks the face to run one of its tools and waits for the result (or the timeout).
+        virtual ToolResult call_tool(const std::string& /*name*/,
+                                     const nlohmann::json& /*arguments*/,
+                                     std::chrono::milliseconds /*timeout*/) {
+            return ToolResult::error("У этого интерфейса нет инструментов.");
+        }
     };
 
 } // namespace yuka

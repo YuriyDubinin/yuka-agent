@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <deque>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -16,8 +17,10 @@ namespace yuka {
     inline constexpr const char* k_dev_socket_path = "/tmp/yuka-dev.sock";
 
     // A GUI face connected over a Unix domain socket using NDJSON (one JSON object per line).
-    //   agent → face: hello, assistant_start, assistant_chunk, assistant_end, error, bye
-    //   face → agent: user_message
+    // Protocol: docs/face-protocol.md.
+    //   agent → face: hello, assistant_start, assistant_chunk, assistant_end, error, bye,
+    //                 tool_call (v2)
+    //   face → agent: user_message, capabilities (v2), tool_result (v2)
     class SocketFace final : public Face {
     public:
         // Starts the face process (passing $YUKA_SOCKET) and waits until it connects.
@@ -42,12 +45,25 @@ namespace yuka {
         void                       show_error(const std::string& message) override;
         bool                       is_alive() const override { return alive_; }
 
+        bool                  take_tools_changed() override;
+        std::vector<FaceTool> tools() const override { return tools_; }
+        std::string           tool_instructions() const override { return instructions_; }
+        ToolResult            call_tool(const std::string&        name,
+                                        const nlohmann::json&     arguments,
+                                        std::chrono::milliseconds timeout) override;
+
     private:
         SocketFace(std::string socket_path, int listen_fd);
 
         // Waits for the face to connect. Returns false if interrupted by Ctrl+C.
         bool wait_for_connection(std::optional<std::chrono::steady_clock::time_point> deadline);
         void send(const nlohmann::json& message);
+
+        // Waits up to `timeout_ms` for data and handles every complete line received.
+        // False once the connection is gone.
+        bool pump(int timeout_ms);
+        void handle_line(const std::string& line);
+        void apply_capabilities(const nlohmann::json& message);
         void shutdown_child();
 
         std::string socket_path_;
@@ -59,6 +75,16 @@ namespace yuka {
         int         reply_id_   = 0;
         bool        reply_open_ = false;
         bool        alive_      = false;
+
+        // v2: tools of the face, user messages that arrived while waiting for a tool result,
+        // the result being waited for.
+        std::vector<FaceTool>                     tools_;
+        std::string                               instructions_;
+        bool                                      tools_changed_ = false;
+        std::deque<std::string>                   pending_messages_;
+        int                                       next_call_id_ = 0;
+        std::string                               awaited_call_;
+        std::optional<ToolResult>                 awaited_result_;
     };
 
 } // namespace yuka

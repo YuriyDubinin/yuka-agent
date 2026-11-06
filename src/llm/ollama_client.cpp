@@ -107,11 +107,76 @@ namespace yuka {
 
     } // namespace
 
+    namespace {
+
+        json encode_message(const ChatMessage& message) {
+            json out{{"role", message.role}, {"content", message.content}};
+            if (!message.tool_calls.empty()) {
+                json calls = json::array();
+                for (const auto& call : message.tool_calls) {
+                    calls.push_back(
+                        {{"function", {{"name", call.name}, {"arguments", call.arguments}}}});
+                }
+                out["tool_calls"] = std::move(calls);
+            }
+            if (!message.tool_name.empty()) {
+                out["tool_name"] = message.tool_name;
+            }
+            return out;
+        }
+
+        json encode_tool(const ToolSpec& tool) {
+            return {{"type", "function"},
+                    {"function",
+                     {{"name", tool.name},
+                      {"description", tool.description},
+                      {"parameters", tool.parameters}}}};
+        }
+
+        // message.tool_calls[] of a streamed chunk. Arguments may be an object or a JSON string.
+        void collect_tool_calls(const json& message, std::vector<ToolCall>& out) {
+            const auto calls = message.find("tool_calls");
+            if (calls == message.end() || !calls->is_array()) {
+                return;
+            }
+            for (const auto& entry : *calls) {
+                if (!entry.is_object()) {
+                    continue;
+                }
+                const auto function = entry.find("function");
+                if (function == entry.end() || !function->is_object()) {
+                    continue;
+                }
+                ToolCall call;
+                if (const auto id = entry.find("id"); id != entry.end() && id->is_string()) {
+                    call.id = id->get<std::string>();
+                }
+                if (const auto name = function->find("name");
+                    name != function->end() && name->is_string()) {
+                    call.name = name->get<std::string>();
+                }
+                if (const auto args = function->find("arguments"); args != function->end()) {
+                    call.arguments = args->is_string()
+                                         ? json::parse(args->get<std::string>(), nullptr, false)
+                                         : *args;
+                    if (call.arguments.is_discarded() || !call.arguments.is_object()) {
+                        call.arguments = json::object();
+                    }
+                }
+                if (!call.name.empty()) {
+                    out.push_back(std::move(call));
+                }
+            }
+        }
+
+    } // namespace
+
     OllamaClient::OllamaClient(std::string base_url, std::string model, nlohmann::json options)
         : base_url_(std::move(base_url)), model_(std::move(model)), options_(std::move(options)) {}
 
-    std::string OllamaClient::chat(const std::vector<ChatMessage>& messages,
-                                   const ChunkHandler&             on_chunk) const {
+    ChatReply OllamaClient::chat(const std::vector<ChatMessage>& messages,
+                                 const std::vector<ToolSpec>&    tools,
+                                 const ChunkHandler&             on_chunk) const {
         json body;
         body["model"]  = model_;
         body["stream"] = true;
@@ -120,10 +185,17 @@ namespace yuka {
         }
         body["messages"] = json::array();
         for (const auto& message : messages) {
-            body["messages"].push_back({{"role", message.role}, {"content", message.content}});
+            body["messages"].push_back(encode_message(message));
+        }
+        if (!tools.empty()) {
+            body["tools"] = json::array();
+            for (const auto& tool : tools) {
+                body["tools"].push_back(encode_tool(tool));
+            }
         }
 
-        const TempRequestFile request(body.dump());
+        // Invalid UTF-8 (e.g. from a face) is replaced instead of aborting the request.
+        const TempRequestFile request(body.dump(-1, ' ', false, json::error_handler_t::replace));
 
         // -sS: no progress bar, but still report transport errors.
         // -N:  disable output buffering so chunks arrive as soon as they are generated.
@@ -136,8 +208,9 @@ namespace yuka {
 
         Pipe pipe(command);
 
-        // Ollama streams NDJSON: {"message":{"content":"..."},"done":false} ... {"done":true}
-        std::string reply;
+        // Ollama streams NDJSON: {"message":{"content":"...","tool_calls":[...]},"done":false}
+        // ... {"done":true}. Tool calls arrive in one of the chunks, usually with no text.
+        ChatReply   reply;
         std::string diagnostics; // non-JSON output (curl errors)
         std::string line;
         bool        finished = false;
@@ -158,11 +231,13 @@ namespace yuka {
 
             if (const auto message = event.find("message");
                 message != event.end() && message->is_object()) {
+                collect_tool_calls(*message, reply.tool_calls);
+
                 const auto content = message->find("content");
                 if (content != message->end() && content->is_string()) {
                     const std::string chunk = content->get<std::string>();
                     if (!chunk.empty()) {
-                        reply += chunk;
+                        reply.text += chunk;
                         if (!on_chunk(chunk)) {
                             return reply; // caller cancelled; Pipe closes curl
                         }
@@ -170,7 +245,8 @@ namespace yuka {
                 }
             }
 
-            finished = event.value("done", false);
+            const auto done = event.find("done");
+            finished        = done != event.end() && done->is_boolean() && done->get<bool>();
         }
 
         const int exit_code = pipe.close();

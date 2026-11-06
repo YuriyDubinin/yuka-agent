@@ -14,9 +14,11 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #include "platform/signals.hpp"
+#include "platform/terminal.hpp"
 
 extern char** environ;
 
@@ -28,6 +30,22 @@ namespace yuka {
         using Clock = std::chrono::steady_clock;
 
         constexpr int k_poll_interval_ms = 200;
+
+        // The face protocol version this agent speaks (docs/face-protocol.md).
+        constexpr int k_protocol_version = 2;
+
+        // ^[a-z][a-z0-9_]{0,63}$
+        bool is_valid_tool_name(const std::string& name) {
+            if (name.empty() || name.size() > 64 || name[0] < 'a' || name[0] > 'z') {
+                return false;
+            }
+            for (char c : name) {
+                if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) {
+                    return false;
+                }
+            }
+            return true;
+        }
 
         std::string errno_message(const char* what) {
             return std::string(what) + ": " + std::strerror(errno);
@@ -240,50 +258,204 @@ namespace yuka {
 
     void SocketFace::start_session(const AgentInfo& agent, const std::string& greeting) {
         send({{"type", "hello"},
+              {"protocol", k_protocol_version},
               {"agent", {{"name", agent.name}, {"model", agent.model}}},
               {"greeting", greeting}});
     }
 
-    std::optional<std::string> SocketFace::read_user_message() {
-        while (alive_) {
-            // Serve complete lines already buffered.
-            std::size_t newline = 0;
-            while ((newline = read_buffer_.find('\n')) != std::string::npos) {
-                const std::string line = read_buffer_.substr(0, newline);
-                read_buffer_.erase(0, newline + 1);
+    bool SocketFace::pump(int timeout_ms) {
+        if (!alive_) {
+            return false;
+        }
 
-                const json message = json::parse(line, nullptr, /*allow_exceptions=*/false);
-                if (!message.is_object() || message.value("type", "") != "user_message") {
-                    continue; // unknown or malformed – ignore
-                }
-                const auto text = message.find("text");
-                if (text != message.end() && text->is_string()) {
-                    return text->get<std::string>();
+        // Read only when no complete line is buffered yet.
+        if (read_buffer_.find('\n') == std::string::npos) {
+            pollfd    pfd{conn_fd_, POLLIN, 0};
+            const int ready = poll(&pfd, 1, timeout_ms);
+            if (ready > 0) {
+                std::array<char, 4096> buffer{};
+                const ssize_t          n = read(conn_fd_, buffer.data(), buffer.size());
+                if (n > 0) {
+                    read_buffer_.append(buffer.data(), static_cast<std::size_t>(n));
+                } else if (n == 0 || errno != EINTR) {
+                    alive_ = false; // window closed
                 }
             }
+            // ready <= 0: timeout or EINTR – the caller re-checks its conditions.
+        }
 
-            if (stop_requested()) {
+        std::size_t newline = 0;
+        while ((newline = read_buffer_.find('\n')) != std::string::npos) {
+            const std::string line = read_buffer_.substr(0, newline);
+            read_buffer_.erase(0, newline + 1);
+            handle_line(line);
+        }
+        return alive_;
+    }
+
+    void SocketFace::handle_line(const std::string& line) {
+        const json message = json::parse(line, nullptr, /*allow_exceptions=*/false);
+        if (!message.is_object()) {
+            return; // malformed – ignore
+        }
+        const auto type_it = message.find("type");
+        if (type_it == message.end() || !type_it->is_string()) {
+            return;
+        }
+        const std::string type = type_it->get<std::string>();
+
+        if (type == "user_message") {
+            const auto text = message.find("text");
+            if (text != message.end() && text->is_string()) {
+                pending_messages_.push_back(text->get<std::string>());
+            }
+        } else if (type == "capabilities") {
+            apply_capabilities(message);
+        } else if (type == "tool_result") {
+            const auto id = message.find("id");
+            if (id == message.end() || !id->is_string() || awaited_call_.empty() ||
+                id->get<std::string>() != awaited_call_) {
+                return; // late (after a timeout) or unknown – ignore
+            }
+            std::string text;
+            if (const auto content = message.find("content");
+                content != message.end() && content->is_array()) {
+                for (const auto& part : *content) {
+                    if (part.is_object() && part.value("type", "") == "text" &&
+                        part.contains("text") && part["text"].is_string()) {
+                        text += (text.empty() ? "" : "\n") + part["text"].get<std::string>();
+                    }
+                }
+            }
+            const auto is_error = message.find("isError");
+            awaited_result_ =
+                ToolResult{text, is_error != message.end() && is_error->is_boolean() &&
+                                     is_error->get<bool>()};
+        }
+        // Anything else: a newer face – ignore.
+    }
+
+    void SocketFace::apply_capabilities(const json& message) {
+        std::vector<FaceTool> tools;
+        if (const auto list = message.find("tools"); list != message.end() && list->is_array()) {
+            for (const auto& entry : *list) {
+                const std::string name =
+                    entry.is_object() ? entry.value("name", std::string()) : std::string();
+                const auto reject = [&](const std::string& why) {
+                    term::print_error("инструмент интерфейса «" + name + "» пропущен: " + why +
+                                      ".");
+                };
+                if (!is_valid_tool_name(name)) {
+                    reject("имя должно быть вида ui_set_theme");
+                    continue;
+                }
+                const auto description = entry.find("description");
+                if (description == entry.end() || !description->is_string() ||
+                    description->get<std::string>().empty()) {
+                    reject("нет описания");
+                    continue;
+                }
+                const auto schema = entry.find("inputSchema");
+                if (schema == entry.end() || !schema->is_object() ||
+                    schema->value("type", "") != "object") {
+                    reject("inputSchema должна быть объектом с type: object");
+                    continue;
+                }
+                bool duplicate = false;
+                for (const auto& tool : tools) {
+                    duplicate = duplicate || tool.spec.name == name;
+                }
+                if (duplicate) {
+                    reject("имя повторяется");
+                    continue;
+                }
+
+                FaceTool tool;
+                tool.spec  = {name, description->get<std::string>(), *schema};
+                tool.title = entry.contains("title") && entry["title"].is_string()
+                                 ? entry["title"].get<std::string>()
+                                 : name;
+                if (const auto notes = entry.find("annotations");
+                    notes != entry.end() && notes->is_object()) {
+                    const auto flag = [&](const char* key) {
+                        const auto it = notes->find(key);
+                        return it != notes->end() && it->is_boolean() && it->get<bool>();
+                    };
+                    tool.annotations = {flag("readOnlyHint"),
+                                        flag("destructiveHint"),
+                                        flag("idempotentHint")};
+                }
+                tools.push_back(std::move(tool));
+            }
+        }
+
+        tools_ = std::move(tools);
+        const auto instructions = message.find("instructions");
+        instructions_ = instructions != message.end() && instructions->is_string()
+                            ? instructions->get<std::string>()
+                            : std::string();
+        tools_changed_ = true;
+    }
+
+    bool SocketFace::take_tools_changed() {
+        // Apply whatever the face has already sent (capabilities usually follow hello).
+        pump(0);
+        return std::exchange(tools_changed_, false);
+    }
+
+    std::optional<std::string> SocketFace::read_user_message() {
+        while (true) {
+            if (!pending_messages_.empty()) {
+                std::string text = std::move(pending_messages_.front());
+                pending_messages_.pop_front();
+                return text;
+            }
+            if (!alive_ || stop_requested()) {
                 return std::nullopt;
             }
+            pump(k_poll_interval_ms);
+        }
+    }
 
-            pollfd    pfd{conn_fd_, POLLIN, 0};
-            const int ready = poll(&pfd, 1, k_poll_interval_ms);
-            if (ready <= 0) {
-                continue;
-            }
+    ToolResult SocketFace::call_tool(const std::string&        name,
+                                     const json&               arguments,
+                                     std::chrono::milliseconds timeout) {
+        if (!alive_) {
+            return ToolResult::error("Интерфейс закрыт.");
+        }
 
-            std::array<char, 4096> buffer{};
-            const ssize_t          n = read(conn_fd_, buffer.data(), buffer.size());
-            if (n < 0 && errno == EINTR) {
-                continue;
-            }
-            if (n <= 0) {
-                alive_ = false; // window closed
+        awaited_call_ = "call_" + std::to_string(++next_call_id_);
+        awaited_result_.reset();
+        send({{"type", "tool_call"},
+              {"id", awaited_call_},
+              {"name", name},
+              {"arguments", arguments}});
+
+        const auto deadline = Clock::now() + timeout;
+        ToolResult result;
+        while (true) {
+            if (awaited_result_) {
+                result = std::move(*awaited_result_);
                 break;
             }
-            read_buffer_.append(buffer.data(), static_cast<std::size_t>(n));
+            if (!alive_) {
+                result = ToolResult::error("Интерфейс закрыт, действие не выполнено.");
+                break;
+            }
+            if (stop_requested()) {
+                result = ToolResult::error("Прервано пользователем.");
+                break;
+            }
+            if (Clock::now() >= deadline) {
+                result = ToolResult::error("Интерфейс не ответил вовремя, действие могло не "
+                                           "выполниться.");
+                break;
+            }
+            pump(k_poll_interval_ms);
         }
-        return std::nullopt;
+        awaited_call_.clear();
+        awaited_result_.reset();
+        return result;
     }
 
     void SocketFace::begin_reply() {

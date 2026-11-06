@@ -115,11 +115,13 @@ namespace yuka {
 
     } // namespace
 
-    std::filesystem::path resolve_storage_dir() {
-        if (const char* env = std::getenv("YUKA_STORAGE"); env != nullptr && *env != '\0') {
-            return std::filesystem::path(env);
+    std::filesystem::path resolve_config_dir() {
+        for (const char* name : {"YUKA_CONFIG", "YUKA_STORAGE"}) {
+            if (const char* env = std::getenv(name); env != nullptr && *env != '\0') {
+                return std::filesystem::path(env);
+            }
         }
-        return executable_dir() / k_storage_dir_name;
+        return executable_dir() / k_config_dir_name;
     }
 
     AgentConfig load_agent_config(const std::filesystem::path& file_path) {
@@ -198,9 +200,10 @@ namespace yuka {
         return join_sentences(config.greeting.base, variant);
     }
 
-    std::string build_system_prompt(const AgentConfig&    config,
-                                    const SessionContext& session,
-                                    const std::string&    greeting) {
+    std::string build_system_prompt(const AgentConfig&        config,
+                                    const SessionContext&     session,
+                                    const std::string&        greeting,
+                                    const PromptCapabilities& capabilities) {
         std::ostringstream prompt;
 
         prompt << config.identity << "\n";
@@ -213,6 +216,32 @@ namespace yuka {
             for (std::size_t i = 0; i < config.rules.size(); ++i) {
                 prompt << i + 1 << ". " << config.rules[i] << "\n";
             }
+        }
+
+        if (capabilities.has_face_tools) {
+            prompt << "\nИнструменты интерфейса:\n";
+            if (!capabilities.face_instructions.empty()) {
+                prompt << capabilities.face_instructions << "\n";
+            }
+            prompt << "- Если " << config.user.name
+                   << " просит тебя что-то сделать с интерфейсом («включи», «закрепи», "
+                      "«перенеси себя»), сделай это инструментом и коротко скажи, что сделала.\n"
+                   << "- Если " << config.user.name
+                   << " спрашивает, как что-то сделать самому («как мне…», «как можно…»), "
+                      "объясни словами и ничего не меняй.\n"
+                   << "- Опасные действия интерфейс сам подтвердит у " << config.user.name
+                   << ": просто вызови инструмент.\n"
+                   << "- Вызывай инструменты только через механизм вызова инструментов, никогда "
+                      "не пиши вызов текстом в ответе.\n";
+        }
+
+        if (!capabilities.skills.empty()) {
+            prompt << "\nНавыки (подробная инструкция загружается инструментом load_skill):\n";
+            for (const auto& [name, description] : capabilities.skills) {
+                prompt << "- " << name << ": " << description << "\n";
+            }
+            prompt << "- Если задача подходит под навык, сначала вызови load_skill с его именем "
+                      "и следуй инструкции.\n";
         }
 
         prompt << "\nТекущая сессия:\n"

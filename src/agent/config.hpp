@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace yuka {
@@ -22,7 +23,7 @@ namespace yuka {
         std::string terminal_chosen; // optional: terminal requested via YUKA_FACE=terminal
     };
 
-    // Base knowledge the agent loads on startup (storage/default.json next to the binary).
+    // Base knowledge the agent loads on startup (config/default.json next to the binary).
     struct AgentConfig {
         std::string              name;
         std::string              language;
@@ -46,11 +47,14 @@ namespace yuka {
         std::string      face_title; // set for SessionInterface::face
     };
 
-    inline constexpr const char* k_storage_dir_name = "storage";
+    // The directory with Yuka's own files, read at startup and never written by the agent:
+    // default.json (persona and settings), skills.json (skills).
+    inline constexpr const char* k_config_dir_name = "config";
     inline constexpr const char* k_config_file_name = "default.json";
 
-    // Storage directory: $YUKA_STORAGE if set, otherwise <binary dir>/storage.
-    std::filesystem::path resolve_storage_dir();
+    // Config directory: $YUKA_CONFIG if set (the old name $YUKA_STORAGE still works),
+    // otherwise <binary dir>/config.
+    std::filesystem::path resolve_config_dir();
 
     // Reads and validates the config. Throws std::runtime_error with a readable message.
     // Placeholders {name}, {user} and {model} are expanded in all text fields.
@@ -60,8 +64,21 @@ namespace yuka {
     std::string compose_greeting(const AgentConfig& config, const SessionContext& session);
 
     // System prompt: identity, relationship, rules and facts about the current session.
-    std::string build_system_prompt(const AgentConfig&    config,
-                                    const SessionContext& session,
-                                    const std::string&    greeting);
+    // What Yuka can do in this session besides talking. Empty by default: then the system
+    // prompt is exactly the plain-chat prompt.
+    struct PromptCapabilities {
+        // Instructions of the connected face for its tools ("capabilities.instructions").
+        std::string face_instructions;
+        // The face has tools (the "interface tools" section is added even without
+        // instructions).
+        bool has_face_tools = false;
+        // Skills as (name, description): an index, the bodies are loaded by load_skill.
+        std::vector<std::pair<std::string, std::string>> skills;
+    };
+
+    std::string build_system_prompt(const AgentConfig&        config,
+                                    const SessionContext&     session,
+                                    const std::string&        greeting,
+                                    const PromptCapabilities& capabilities = {});
 
 } // namespace yuka

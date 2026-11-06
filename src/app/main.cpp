@@ -8,7 +8,9 @@
 #include <string>
 #include <vector>
 
+#include "agent/chat_session.hpp"
 #include "agent/config.hpp"
+#include "agent/skills.hpp"
 #include "faces/face.hpp"
 #include "faces/face_discovery.hpp"
 #include "faces/socket/socket_face.hpp"
@@ -22,8 +24,11 @@ namespace {
 
     constexpr const char* k_ollama_base_url = "http://127.0.0.1:11434";
 
-    // Upper bound on user/assistant messages kept in context (the system prompt is always kept).
-    constexpr std::size_t k_max_history_messages = 40;
+    // Hidden override for tests (a fake Ollama server); not part of the public setup.
+    std::string ollama_base_url() {
+        const char* env = std::getenv("YUKA_OLLAMA_URL");
+        return (env != nullptr && *env != '\0') ? env : k_ollama_base_url;
+    }
 
     // How long a GUI face may take to start and connect.
     constexpr std::chrono::seconds k_face_connect_timeout{30};
@@ -43,7 +48,7 @@ namespace {
             models = client.list_models();
         } catch (const std::exception& ex) {
             yuka::term::print_error(std::string("сервер Ollama недоступен по адресу ") +
-                                    k_ollama_base_url + " (" + ex.what() + ").");
+                                    client.base_url() + " (" + ex.what() + ").");
             yuka::term::print_info("Запусти Ollama (приложение или 'ollama serve') и повтори.");
             return false;
         }
@@ -95,8 +100,10 @@ namespace {
         if (session.interface == yuka::SessionInterface::terminal_backup) {
             inner_cmd += std::string("export ") + k_env_terminal_fallback + "=1; ";
         }
-        if (const char* storage = std::getenv("YUKA_STORAGE"); storage != nullptr) {
-            inner_cmd += "export YUKA_STORAGE=\\\"" + std::string(storage) + "\\\"; ";
+        for (const char* name : {"YUKA_CONFIG", "YUKA_STORAGE"}) {
+            if (const char* value = std::getenv(name); value != nullptr) {
+                inner_cmd += std::string("export ") + name + "=\\\"" + value + "\\\"; ";
+            }
         }
         inner_cmd += "\\\"" + executable_path.string() + "\\\"";
 
@@ -177,64 +184,8 @@ namespace {
         return terminal_selection(yuka::SessionInterface::terminal_backup);
     }
 
-    // Keeps the system prompt (index 0) and the most recent messages.
-    void trim_history(std::vector<yuka::ChatMessage>& history) {
-        if (history.size() <= k_max_history_messages + 1) {
-            return;
-        }
-        const auto excess = history.size() - (k_max_history_messages + 1);
-        history.erase(history.begin() + 1, history.begin() + 1 + static_cast<long>(excess));
-    }
-
-    void run_chat(yuka::Face&                 face,
-                  const yuka::SessionContext& session,
-                  const yuka::OllamaClient&   client,
-                  const yuka::AgentConfig&    config) {
-        // The greeting depends on how the user reaches Yuka in this session.
-        const std::string greeting = yuka::compose_greeting(config, session);
-
-        std::vector<yuka::ChatMessage> history;
-        history.push_back({"system", yuka::build_system_prompt(config, session, greeting)});
-        history.push_back({"assistant", greeting});
-
-        face.start_session({config.name, config.model}, greeting);
-
-        while (!yuka::stop_requested() && face.is_alive()) {
-            const auto input = face.read_user_message();
-            if (!input) {
-                break;
-            }
-            if (input->empty()) {
-                continue;
-            }
-
-            history.push_back({"user", *input});
-            face.begin_reply();
-
-            try {
-                const std::string reply = client.chat(history, [&](const std::string& chunk) {
-                    face.reply_chunk(chunk);
-                    return !yuka::stop_requested() && face.is_alive();
-                });
-                face.end_reply();
-
-                if (yuka::stop_requested() || !face.is_alive()) {
-                    break;
-                }
-                history.push_back({"assistant", reply});
-                trim_history(history);
-            } catch (const std::exception& ex) {
-                history.pop_back(); // drop the unanswered user message
-                if (yuka::stop_requested()) {
-                    break;
-                }
-                face.show_error(ex.what());
-            }
-        }
-    }
-
     bool load_config(yuka::AgentConfig& config) {
-        const auto config_path = yuka::resolve_storage_dir() / yuka::k_config_file_name;
+        const auto config_path = yuka::resolve_config_dir() / yuka::k_config_file_name;
         try {
             config = yuka::load_agent_config(config_path);
             return true;
@@ -242,8 +193,8 @@ namespace {
             yuka::term::print_error(std::string("не удалось загрузить конфигурацию агента: ") +
                                     ex.what());
             yuka::term::print_info(std::string("Положи ") + yuka::k_config_file_name +
-                                   " в каталог " + yuka::k_storage_dir_name +
-                                   "/ рядом с yuka-agent или укажи каталог через YUKA_STORAGE.");
+                                   " в каталог " + yuka::k_config_dir_name +
+                                   "/ рядом с yuka-agent или укажи каталог через YUKA_CONFIG.");
             return false;
         }
     }
@@ -260,7 +211,7 @@ int main() {
     }
 
     // Ollama must already be running with the configured model; it is never started here.
-    const yuka::OllamaClient client(k_ollama_base_url, config.model, config.options);
+    const yuka::OllamaClient client(ollama_base_url(), config.model, config.options);
     if (!check_ollama(client)) {
         return 1;
     }
@@ -283,7 +234,13 @@ int main() {
                                "чтобы выйти.");
     }
 
-    run_chat(*selection->face, selection->session, client, config);
+    // Skills: config/skills.json (optional).
+    auto skills = yuka::SkillLibrary::load(yuka::resolve_config_dir() /
+                                           yuka::SkillLibrary::k_file_name);
+
+    yuka::ChatSession chat(
+        *selection->face, selection->session, client, config, std::move(skills), is_gui);
+    chat.run();
 
     selection->face.reset(); // say goodbye to the GUI and wait for it to close
     std::cout << "\n" << yuka::term::info << "До встречи!" << yuka::term::reset << "\n";
