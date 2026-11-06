@@ -49,6 +49,12 @@ namespace yuka {
         });
     }
 
+    void ToolRegistry::refresh() {
+        for (auto& entry : tools_) {
+            entry.tool->refresh();
+        }
+    }
+
     std::vector<ToolSpec> ToolRegistry::specs() const {
         std::vector<ToolSpec> specs;
         specs.reserve(tools_.size());

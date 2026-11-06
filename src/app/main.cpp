@@ -238,8 +238,16 @@ int main() {
     auto skills = yuka::SkillLibrary::load(yuka::resolve_config_dir() /
                                            yuka::SkillLibrary::k_file_name);
 
-    yuka::ChatSession chat(
-        *selection->face, selection->session, client, config, std::move(skills), is_gui);
+    // What Yuka may touch on this computer: config/access.json (optional).
+    auto access = yuka::AccessConfig::load(yuka::resolve_config_dir());
+
+    yuka::ChatSession chat(*selection->face,
+                           selection->session,
+                           client,
+                           config,
+                           std::move(skills),
+                           std::move(access),
+                           is_gui);
     chat.run();
 
     selection->face.reset(); // say goodbye to the GUI and wait for it to close

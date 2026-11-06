@@ -26,6 +26,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 # ------------------------------------------------------------
 add_executable(yuka-agent
     src/app/main.cpp
+    src/agent/access.cpp
     src/agent/config.cpp
     src/agent/chat_session.cpp
     src/agent/skills.cpp
@@ -34,9 +35,15 @@ add_executable(yuka-agent
     src/faces/face_discovery.cpp
     src/faces/terminal/terminal_face.cpp
     src/faces/socket/socket_face.cpp
+    src/platform/macos_apps.cpp
+    src/platform/macos_windows.cpp
+    src/platform/process.cpp
     src/platform/signals.cpp
     src/tools/tool_registry.cpp
+    src/tools/builtin/app_tools.cpp
     src/tools/builtin/load_skill_tool.cpp
+    src/tools/builtin/name_match.cpp
+    src/tools/builtin/project_tools.cpp
 )
 
 # Project headers are included relative to src/, e.g. "faces/socket/socket_face.hpp".

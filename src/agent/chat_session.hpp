@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "agent/access.hpp"
 #include "agent/config.hpp"
 #include "agent/skills.hpp"
 #include "faces/face.hpp"
@@ -28,6 +29,7 @@ namespace yuka {
                     const OllamaClient&   client,
                     const AgentConfig&    config,
                     SkillLibrary          skills,
+                    AccessConfig          access,
                     bool                  report_tools_in_terminal);
 
         // Greets and runs turns until the user leaves, the face closes or Ctrl+C.
@@ -44,6 +46,7 @@ namespace yuka {
         const OllamaClient&   client_;
         const AgentConfig&    config_;
         SkillLibrary          skills_;
+        AccessConfig          access_;
         ToolRegistry          tools_;
         bool                  report_tools_;
         std::string           greeting_;

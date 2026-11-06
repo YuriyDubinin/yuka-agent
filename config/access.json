@@ -1,0 +1,26 @@
+{
+    "apps": [
+        {
+            "id": "vscode",
+            "name": "Visual Studio Code",
+            "description": "редактор кода",
+            "bundle_id": "com.microsoft.VSCode",
+            "open": true,
+            "close": true,
+            "open_folder": {
+                "cli": "Contents/Resources/app/bin/code",
+                "args": ["--new-window", "{path}"]
+            },
+            "window_title": "{folder}"
+        }
+    ],
+    "folders": [
+        {
+            "id": "projects",
+            "name": "Проекты",
+            "path": "~/Documents/Projects",
+            "contains": "projects",
+            "open_with": "vscode"
+        }
+    ]
+}

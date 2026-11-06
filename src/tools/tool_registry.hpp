@@ -20,6 +20,9 @@ namespace yuka {
 
         bool empty() const { return tools_.empty(); }
 
+        // Lets every tool update its description (see Tool::refresh).
+        void refresh();
+
         // Specs for the model: built-in tools first, then the face's, each in its own order.
         std::vector<ToolSpec> specs() const;
 

@@ -38,6 +38,10 @@ namespace yuka {
 
         virtual ToolAnnotations annotations() const = 0;
 
+        // Called before every turn: a tool whose description depends on the outside world
+        // (e.g. the list of projects on disk) updates spec() here.
+        virtual void refresh() {}
+
         // Runs the tool. `arguments` is always a JSON object.
         virtual ToolResult call(const nlohmann::json& arguments) = 0;
     };

@@ -5,7 +5,9 @@
 #include "agent/tool_call_text.hpp"
 #include "platform/signals.hpp"
 #include "platform/terminal.hpp"
+#include "tools/builtin/app_tools.hpp"
 #include "tools/builtin/load_skill_tool.hpp"
+#include "tools/builtin/project_tools.hpp"
 #include "tools/remote_tool.hpp"
 
 namespace yuka {
@@ -88,16 +90,25 @@ namespace yuka {
                              const OllamaClient&   client,
                              const AgentConfig&    config,
                              SkillLibrary          skills,
+                             AccessConfig          access,
                              bool                  report_tools_in_terminal)
         : face_(face),
           session_(session),
           client_(client),
           config_(config),
           skills_(std::move(skills)),
+          access_(std::move(access)),
           report_tools_(report_tools_in_terminal) {
         std::vector<std::unique_ptr<Tool>> builtin;
         if (!skills_.empty()) {
             builtin.push_back(make_load_skill_tool(skills_));
+        }
+        // What config/access.json allows: programs and project folders.
+        for (auto& tool : make_app_tools(access_)) {
+            builtin.push_back(std::move(tool));
+        }
+        for (auto& tool : make_project_tools(access_)) {
+            builtin.push_back(std::move(tool));
         }
         tools_.replace_source(ToolSource::builtin, std::move(builtin));
     }
@@ -142,6 +153,7 @@ namespace yuka {
         if (face_.take_tools_changed()) {
             refresh_tools();
         }
+        tools_.refresh(); // e.g. the current list of projects on disk
 
         const std::size_t checkpoint = history_.size(); // rollback point
         const auto        rollback   = [&] { history_.resize(checkpoint); };
